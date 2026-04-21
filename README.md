@@ -15,6 +15,7 @@ Computed Total: 45000
 Items:
 - Tea   : 20000 x 1
 - Bread : 25000 x 1
+
 🚀 Key Features
 Replacement of centralized database with blockchain storage
 Immutable transaction records
