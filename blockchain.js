@@ -3,7 +3,7 @@ const EC = require('elliptic').ec;
 const ec = new EC('secp256k1');
 
 class Transaction {
-    constructor({ txId = '', sender = '', receiver = '', recordedAmount = 0, timestamp = new Date().toISOString(), data = { items: [], total: 0 }, signerAddress = '' }) {
+    constructor({ txId = '', sender = '', receiver = '', recordedAmount = 0, timestamp = new Date().toISOString(), data = { items: [], total: 0 }, signerAddress = '', transactionType = 'PAYMENT' }) {
         this.txId = txId;
         this.sender = sender;
         this.receiver = receiver;
@@ -14,6 +14,7 @@ class Transaction {
             total: Number(data?.total ?? 0),
         };
         this.signerAddress = signerAddress;
+        this.transactionType = transactionType;
         this.signature = '';
     }
 
@@ -51,6 +52,7 @@ class Block {
         this.previousHash = previousHash;
         this.hash = this.calculateHash();
         this.nonce = 0;
+        this.minerAddress = '';
     }
 
     calculateHash() {
@@ -102,21 +104,21 @@ class Blockchain {
 
     minePendingTransactions(miningRewardAddress) {
         let block = new Block(Date.now(), this.pendingTransactions, this.getLatestBlock().hash);
+        block.minerAddress = miningRewardAddress;
         block.mineBlock(this.difficulty);
 
         console.log('Block successfully mined!');
         this.chain.push(block);
 
-        // Temporary: disable miner reward transaction recording so blocks only contain customer-to-cafe transactions.
-        // this.pendingTransactions = [new Transaction({
-        //     txId: this.createTxId(),
-        //     sender: 'SYSTEM',
-        //     receiver: miningRewardAddress,
-        //     recordedAmount: this.miningRewards,
-        //     data: { items: [], total: this.miningRewards },
-        //     signerAddress: null,
-        // })];
-        this.pendingTransactions = [];
+        this.pendingTransactions = [new Transaction({
+            txId: this.createTxId(),
+            sender: 'SYSTEM',
+            receiver: miningRewardAddress,
+            recordedAmount: this.miningRewards,
+            data: { items: [], total: this.miningRewards },
+            signerAddress: null,
+            transactionType: 'MINING_REWARD',
+        })];
 
     }
 
@@ -141,6 +143,10 @@ class Blockchain {
 
         for (const block of this.chain) {
             for (const trans of block.transactions) {
+                if (trans.transactionType === 'MINING_REWARD') {
+                    continue;
+                }
+
                 const txTotal = Number(trans?.data?.total ?? trans?.recordedAmount ?? 0);
 
                 if (trans.sender === address) {
@@ -153,6 +159,18 @@ class Blockchain {
         }
 
         return balance;
+    }
+
+    getBlocksMinedByAddress(address) {
+        let count = 0;
+
+        for (const block of this.chain) {
+            if (block.minerAddress === address) {
+                count += 1;
+            }
+        }
+
+        return count;
     }
 
     isChainValid() {

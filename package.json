@@ -6,7 +6,10 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "node:start": "node node-server.js --port 3001",
+    "node:2": "node node-server.js --port 3002",
+    "node:3": "node node-server.js --port 3003"
   },
   "dependencies": {
     "crypto-js": "^4.2.0",

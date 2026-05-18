@@ -1,6 +1,7 @@
-import SHA256 from 'crypto-js/sha256';
-import { ec as EC } from 'elliptic';
+import SHA256 from 'crypto-js/sha256.js';
+import elliptic from 'elliptic';
 
+const { ec: EC } = elliptic;
 const ec = new EC('secp256k1');
 
 export class Transaction {
@@ -12,6 +13,7 @@ export class Transaction {
     timestamp = new Date().toISOString(),
     data = { items: [], total: 0 },
     signerAddress = '',
+    transactionType = 'PAYMENT',
   }) {
     this.txId = txId;
     this.sender = sender;
@@ -23,6 +25,7 @@ export class Transaction {
       total: Number(data?.total ?? 0),
     };
     this.signerAddress = signerAddress;
+    this.transactionType = transactionType;
     this.signature = '';
   }
 
@@ -63,6 +66,7 @@ export class Block {
     this.previousHash = previousHash;
     this.nonce = 0;
     this.hash = this.calculateHash();
+    this.minerAddress = '';
   }
 
   calculateHash() {
@@ -116,21 +120,21 @@ export class Blockchain {
 
   minePendingTransactions(miningRewardAddress) {
     const block = new Block(Date.now(), [...this.pendingTransactions], this.getLatestBlock().hash);
+    block.minerAddress = miningRewardAddress;
     block.mineBlock(this.difficulty);
     this.chain.push(block);
 
-    // Temporary: disable miner reward transaction recording so blocks only contain customer-to-cafe transactions.
-    // this.pendingTransactions = [
-    //   new Transaction({
-    //     txId: this.createTxId(),
-    //     sender: 'SYSTEM',
-    //     receiver: miningRewardAddress,
-    //     recordedAmount: this.miningRewards,
-    //     data: { items: [], total: this.miningRewards },
-    //     signerAddress: null,
-    //   }),
-    // ];
-    this.pendingTransactions = [];
+    this.pendingTransactions = [
+      new Transaction({
+        txId: this.createTxId(),
+        sender: 'SYSTEM',
+        receiver: miningRewardAddress,
+        recordedAmount: this.miningRewards,
+        data: { items: [], total: this.miningRewards },
+        signerAddress: null,
+        transactionType: 'MINING_REWARD',
+      }),
+    ];
   }
 
   addTransactions(transaction) {
@@ -146,7 +150,10 @@ export class Blockchain {
       throw new Error('Cannot add invalid transaction into the chain.');
     }
 
-    this.pendingTransactions.push(transaction);
+    const txInstance = transaction instanceof Transaction
+      ? transaction
+      : new Transaction(transaction);
+    this.pendingTransactions.push(txInstance);
   }
 
   getBalanceOfAddress(address) {
@@ -158,6 +165,10 @@ export class Blockchain {
       }
 
       for (const trans of block.transactions) {
+        if (trans.transactionType === 'MINING_REWARD') {
+          continue;
+        }
+
         const txTotal = Number(trans?.data?.total ?? trans?.recordedAmount ?? 0);
 
         if (trans.sender === address) {
@@ -170,6 +181,18 @@ export class Blockchain {
     }
 
     return balance;
+  }
+
+  getBlocksMinedByAddress(address) {
+    let count = 0;
+
+    for (const block of this.chain) {
+      if (block.minerAddress === address) {
+        count += 1;
+      }
+    }
+
+    return count;
   }
 
   isChainValid() {
@@ -190,6 +213,55 @@ export class Blockchain {
       }
     }
 
+    return true;
+  }
+
+  static fromData(data) {
+    const blockchain = new Blockchain();
+    blockchain.difficulty = data?.difficulty ?? blockchain.difficulty;
+    blockchain.miningRewards = data?.miningRewards ?? blockchain.miningRewards;
+    blockchain.txCounter = data?.txCounter ?? blockchain.txCounter;
+
+    blockchain.chain = (data?.chain ?? []).map((rawBlock) => {
+      const block = new Block(
+        rawBlock.timestamp ?? rawBlock.timestamps,
+        Array.isArray(rawBlock.transactions)
+          ? rawBlock.transactions.map((rawTx) => new Transaction(rawTx))
+          : rawBlock.transactions,
+        rawBlock.previousHash ?? ''
+      );
+      block.nonce = rawBlock.nonce ?? 0;
+      block.hash = rawBlock.hash ?? block.calculateHash();
+      block.minerAddress = rawBlock.minerAddress ?? '';
+      return block;
+    });
+
+    blockchain.pendingTransactions = (data?.pendingTransactions ?? []).map(
+      (rawTx) => new Transaction(rawTx)
+    );
+
+    if (!blockchain.chain.length) {
+      blockchain.chain = [blockchain.createGenesisBlock()];
+    }
+
+    return blockchain;
+  }
+
+  replaceChain(candidateData) {
+    const incoming = Blockchain.fromData(candidateData);
+    if (incoming.chain.length <= this.chain.length) {
+      return false;
+    }
+
+    if (!incoming.isChainValid()) {
+      return false;
+    }
+
+    this.chain = incoming.chain;
+    this.pendingTransactions = incoming.pendingTransactions;
+    this.difficulty = incoming.difficulty;
+    this.miningRewards = incoming.miningRewards;
+    this.txCounter = incoming.txCounter;
     return true;
   }
 }

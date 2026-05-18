@@ -1,23 +1,9 @@
 import { useMemo, useState } from 'react';
 import { Blockchain, Transaction, generateWallet } from './blockchain';
+import { catalog, getSortedCompanyNames } from './catalog';
 
 const defaultPrivateKey = '6e9d2771b85cf67ba9a7a9e86ef4438ee5fa8affa91d0b524a06beb4f2b209f7';
-const menuByCategory = {
-  Beverages: [
-    { name: 'Tea', price: 20000 },
-    { name: 'Coffee', price: 20000 },
-  ],
-  Food: [
-    { name: 'Sandwich', price: 30000 },
-    { name: 'Bread', price: 25000 },
-  ],
-};
-
-const allMenuItems = Object.entries(menuByCategory).flatMap(([category, items]) =>
-  items.map((item) => ({ ...item, category }))
-);
-
-const defaultItemLine = { category: 'Beverages', itemName: '', qty: 1 };
+const defaultItemLine = { category: '', itemName: '', qty: 1 };
 
 function formatTs(ts) {
   if (typeof ts === 'number') {
@@ -63,7 +49,7 @@ export default function App() {
   const [txForm, setTxForm] = useState({
     fromPrivateKey: defaultPrivateKey,
     sender: 'Hengky',
-    receiver: 'CafeA',
+    receiver: '',
     itemLines: [],
   });
   const [mineAddress, setMineAddress] = useState('');
@@ -97,6 +83,42 @@ export default function App() {
     return chain.getBalanceOfAddress(normalized);
   }, [chain, addressQuery]);
 
+  const searchedBlocksMined = useMemo(() => {
+    const normalized = addressQuery.trim();
+    if (!normalized) {
+      return null;
+    }
+    return chain.getBlocksMinedByAddress(normalized);
+  }, [chain, addressQuery]);
+
+  const companyOptions = useMemo(() => getSortedCompanyNames(), []);
+
+  const selectedCompany = useMemo(
+    () => catalog.companies.find((company) => company.name === txForm.receiver) ?? null,
+    [txForm.receiver]
+  );
+
+  const menuByCategory = useMemo(() => {
+    if (!selectedCompany) {
+      return {};
+    }
+
+    return selectedCompany.categories.reduce((acc, category) => {
+      acc[category.name] = category.items;
+      return acc;
+    }, {});
+  }, [selectedCompany]);
+
+  const categoryNames = useMemo(() => Object.keys(menuByCategory), [menuByCategory]);
+
+  const allMenuItems = useMemo(
+    () =>
+      Object.entries(menuByCategory).flatMap(([category, items]) =>
+        items.map((item) => ({ ...item, category }))
+      ),
+    [menuByCategory]
+  );
+
   function refreshChain() {
     setChain(Object.assign(Object.create(Object.getPrototypeOf(chain)), chain));
   }
@@ -115,7 +137,17 @@ export default function App() {
   }
 
   function updateTxField(field, value) {
-    setTxForm((prev) => ({ ...prev, [field]: value }));
+    setTxForm((prev) => {
+      if (field === 'receiver') {
+        return {
+          ...prev,
+          receiver: value,
+          itemLines: [],
+        };
+      }
+
+      return { ...prev, [field]: value };
+    });
   }
 
   function addTransaction(event) {
@@ -124,6 +156,10 @@ export default function App() {
 
     try {
       const wallet = generateWallet(txForm.fromPrivateKey.trim());
+      if (!txForm.receiver.trim()) {
+        throw new Error('Please choose a cafe/company first.');
+      }
+
       const mergedByName = new Map();
       txForm.itemLines.forEach((line) => {
         const menuItem = allMenuItems.find(
@@ -262,9 +298,19 @@ export default function App() {
   }
 
   function addItemLine() {
+    if (!categoryNames.length) {
+      return;
+    }
+
     setTxForm((prev) => ({
       ...prev,
-      itemLines: [...prev.itemLines, { ...defaultItemLine }],
+      itemLines: [
+        ...prev.itemLines,
+        {
+          ...defaultItemLine,
+          category: categoryNames[0],
+        },
+      ],
     }));
   }
 
@@ -437,15 +483,24 @@ export default function App() {
               />
             </label>
             <label>
-              Receiver Name
-              <input
+              Choose Cafe/Company
+              <select
                 value={txForm.receiver}
                 onChange={(e) => updateTxField('receiver', e.target.value)}
-                placeholder="Receiver"
-              />
+              >
+                <option value="">Select company</option>
+                {companyOptions.map((company) => (
+                  <option key={company} value={company}>
+                    {company}
+                  </option>
+                ))}
+              </select>
             </label>
             <div className="tx-item">
               <p className="small"><strong>Items (fixed price, categorized)</strong></p>
+              {!txForm.receiver && (
+                <p className="small">Choose a cafe/company first, then add items.</p>
+              )}
               {txForm.itemLines.length === 0 && (
                 <p className="small">No items yet. Click Add to create one item line.</p>
               )}
@@ -459,7 +514,7 @@ export default function App() {
                         value={line.category}
                         onChange={(e) => updateItemLine(index, 'category', e.target.value)}
                       >
-                        {Object.keys(menuByCategory).map((category) => (
+                        {categoryNames.map((category) => (
                           <option key={category} value={category}>
                             {category}
                           </option>
@@ -496,7 +551,12 @@ export default function App() {
                 </div>
               ))}
               <div className="item-actions">
-                <button type="button" className="small-btn secondary" onClick={addItemLine}>
+                <button
+                  type="button"
+                  className="small-btn secondary"
+                  onClick={addItemLine}
+                  disabled={!txForm.receiver}
+                >
                   + Add
                 </button>
                 {txForm.itemLines.length > 0 && (
@@ -548,6 +608,7 @@ export default function App() {
           {addressQuery.trim() && (
             <>
               <p>Balance: <strong>{searchedBalance}</strong></p>
+              <p>Blocks Mined: <strong>{searchedBlocksMined}</strong></p>
               <p className="small">Transactions found: {foundAddressTransactions.length}</p>
               <div className="scroll-area">
                 {foundAddressTransactions.length === 0 && (
